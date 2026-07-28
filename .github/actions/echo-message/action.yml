@@ -1,0 +1,13 @@
+name: Echo Message
+description: Echo a message input to demonstrate a local custom GitHub Action.
+inputs:
+  message:
+    description: Message to echo
+    required: false
+    default: hello from local custom action
+runs:
+  using: composite
+  steps:
+    - name: Print message
+      shell: bash
+      run: echo "${{ inputs.message }}"
