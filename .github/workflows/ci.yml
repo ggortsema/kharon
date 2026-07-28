@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Import check
+        run: uv run python -c "from kharon.main import app; print(app.title)"
+
+      - name: Endpoint check
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          import httpx
+
+          from kharon.main import app
+
+
+          async def check() -> None:
+              transport = httpx.ASGITransport(app=app)
+              async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                  response = await client.get("/")
+                  assert response.status_code == 200
+                  assert response.json() == {"message": "Hello world"}
+
+
+          asyncio.run(check())
+          print("endpoint ok")
+          PY
