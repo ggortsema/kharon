@@ -7,7 +7,7 @@ app = FastAPI(title="kharon")
 
 @app.get("/")
 def read_root() -> dict[str, str]:
-    return {"message": "Hello world!"}
+    return {"message": "Hello world!!"}
 
 
 def main() -> None:
