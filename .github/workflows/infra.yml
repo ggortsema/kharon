@@ -54,7 +54,7 @@ jobs:
 
       - name: Terragrunt plan
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         working-directory: infra/live/dev
         run: terragrunt run --all plan --non-interactive -- -input=false
 
@@ -92,6 +92,6 @@ jobs:
 
       - name: Terragrunt apply
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         working-directory: infra/live/dev
         run: terragrunt run --all apply --non-interactive -- -auto-approve -input=false
