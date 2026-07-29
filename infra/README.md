@@ -21,6 +21,7 @@ Note: EKS control plane is AWS-managed, so you do not set a "control node count"
 - `infra/live/dev/ecr/terragrunt.hcl` ECR module
 - `infra/live/dev/vpc/terragrunt.hcl` VPC module
 - `infra/live/dev/eks/terragrunt.hcl` EKS module
+- `infra/live/dev/iam/terragrunt.hcl` IAM roles (GitHub OIDC + IRSA roles)
 - `infra/live/dev/flux/terragrunt.hcl` Flux bootstrap stack
 
 ## GitHub Token Requirement

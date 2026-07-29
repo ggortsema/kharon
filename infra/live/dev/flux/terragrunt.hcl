@@ -6,6 +6,10 @@ terraform {
   source = "../../../modules/flux-bootstrap"
 }
 
+dependencies {
+  paths = ["../iam"]
+}
+
 dependency "eks" {
   config_path = "../eks"
 }
