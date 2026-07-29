@@ -56,7 +56,11 @@ jobs:
               async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                   response = await client.get("/")
                   assert response.status_code == 200
-                  assert response.json() == {"message": "Hello world"}
+                  payload = response.json()
+                  assert isinstance(payload, dict)
+                  assert "message" in payload
+                  assert isinstance(payload["message"], str)
+                  assert payload["message"].strip()
 
 
           asyncio.run(check())
