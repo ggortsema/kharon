@@ -24,7 +24,7 @@ spec:
   values:
     image:
       repository: 359546647832.dkr.ecr.us-east-1.amazonaws.com/kharon-dev
-      tag: v0.0.21 # {"$imagepolicy": "flux-system:kharon:tag"}
+      tag: v0.0.24 # {"$imagepolicy": "flux-system:kharon:tag"}
     replicaCount: 1
     ingress:
       enabled: true
