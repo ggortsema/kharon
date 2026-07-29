@@ -5,4 +5,5 @@ metadata:
   namespace: flux-system
 spec:
   image: 359546647832.dkr.ecr.us-east-1.amazonaws.com/kharon-dev
+  provider: aws
   interval: 1m
