@@ -16,6 +16,8 @@ spec:
   values:
     provider: aws
     policy: upsert-only
+    sources:
+      - ingress
     txtOwnerId: kharon-dev
     domainFilters:
       - dev.mycroftai.org
