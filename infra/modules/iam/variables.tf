@@ -23,6 +23,11 @@ variable "external_dns_role_name" {
   type        = string
 }
 
+variable "flux_image_reflector_role_name" {
+  description = "IAM role name for Flux image-reflector-controller IRSA"
+  type        = string
+}
+
 variable "eks_oidc_provider_arn" {
   description = "EKS OIDC provider ARN"
   type        = string

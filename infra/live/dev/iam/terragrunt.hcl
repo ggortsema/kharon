@@ -23,6 +23,7 @@ inputs = {
   github_actions_role_name = "kharon-gha-terraform-plan-apply"
   alb_controller_role_name = "kharon-aws-load-balancer-controller"
   external_dns_role_name   = "kharon-external-dns"
+  flux_image_reflector_role_name = "kharon-flux-image-reflector"
 
   eks_oidc_provider_arn = dependency.eks.outputs.oidc_provider_arn
   eks_oidc_provider_url = dependency.eks.outputs.oidc_provider
