@@ -20,7 +20,7 @@ spec:
       - ingress
     txtOwnerId: kharon-dev
     domainFilters:
-      - dev.mycroftai.org
+      - mycroftai.org
     serviceAccount:
       create: true
       name: external-dns
