@@ -8,10 +8,10 @@ spec:
   chart:
     spec:
       chart: external-dns
-      version: "8.*"
+      version: "1.*"
       sourceRef:
         kind: HelmRepository
-        name: bitnami
+        name: external-dns
         namespace: flux-system
   values:
     provider: aws
