@@ -7280,6 +7280,8 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::359546647832:role/kharon-flux-image-reflector
   labels:
     app.kubernetes.io/component: image-reflector-controller
     app.kubernetes.io/instance: flux-system
