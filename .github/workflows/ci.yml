@@ -82,6 +82,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: arn:aws:iam::359546647832:role/kharon-gha-terraform-plan-apply
 
+      - name: Wait for ECR repository
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          for i in $(seq 1 24); do
+            if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "ECR repository is ready"
+              exit 0
+            fi
+            echo "Waiting for ECR repository $ECR_REPOSITORY to exist..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for ECR repository $ECR_REPOSITORY"
+          exit 1
+
       - name: Login to Amazon ECR
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: aws-actions/amazon-ecr-login@v2

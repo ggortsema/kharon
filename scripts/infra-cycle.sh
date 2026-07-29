@@ -41,7 +41,7 @@ Usage:
 Description:
   status     Shows what would run/skip for each stack and readiness checks.
   destroy    Destroys stack in safe reverse order: flux -> iam -> eks -> vpc -> ecr
-  recreate   Recreates stack in dependency order: ecr -> vpc -> eks -> iam -> flux
+  recreate   Recreates stack in dependency order: bootstrap-iam -> ecr -> vpc -> eks -> iam -> flux
   full-cycle Runs destroy then recreate
 
 Options:
@@ -186,7 +186,7 @@ print_stack_status() {
       ;;
   esac
 
-  printf "  - %-4s state=%-3s | recreate: %-36s | destroy: %s\n" "$dir" "$has_state" "$recreate_action" "$destroy_action"
+  printf "  - %-13s state=%-3s | recreate: %-36s | destroy: %s\n" "$dir" "$has_state" "$recreate_action" "$destroy_action"
 }
 
 print_eks_runtime_status() {
@@ -430,6 +430,7 @@ print_endpoint_status_json() {
 
 status_summary() {
   log "Stack status (idempotency preview)"
+  print_stack_status bootstrap-iam
   print_stack_status ecr
   print_stack_status vpc
   print_stack_status eks
@@ -461,7 +462,7 @@ status_summary() {
 }
 
 status_summary_json() {
-  local stacks=(ecr vpc eks iam flux)
+  local stacks=(bootstrap-iam ecr vpc eks iam flux)
   local first_stack="true"
   local first_failure="true"
 
@@ -755,6 +756,7 @@ recreate_stack() {
     exit 1
   fi
 
+  tg_apply_if_needed bootstrap-iam
   tg_apply_if_needed ecr
   tg_apply_if_needed vpc
   tg_apply_if_needed eks

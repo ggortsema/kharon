@@ -8,6 +8,7 @@ This directory contains `infra-cycle.sh`, a single-entry script to safely destro
 - Skips steps that are already complete when possible.
 - Waits for EKS, Flux, and app endpoint readiness (unless disabled).
 - Supports a status preflight mode for both humans and automation.
+- Preserves a bootstrap GitHub Actions IAM role so a post-teardown push can still self-rebuild.
 
 ## Prerequisites
 
@@ -44,6 +45,7 @@ The script uses these defaults unless overridden by environment variables:
 Shows an idempotency preview and runtime readiness.
 
 - Per stack (ecr, vpc, eks, iam, flux):
+- Per stack (bootstrap-iam, ecr, vpc, eks, iam, flux):
   - state presence
   - recreate decision (skip/apply)
   - destroy decision (skip/destroy)
@@ -67,6 +69,8 @@ Destroys in reverse dependency order:
 
 - flux -> iam -> eks -> vpc -> ecr
 
+`bootstrap-iam` is intentionally not destroyed. It holds the GitHub OIDC role used by CI/Infra workflows and must remain so a single push can recreate everything else.
+
 Examples:
 
 ```bash
@@ -80,7 +84,7 @@ scripts/infra-cycle.sh destroy --no-wait --yes
 
 Creates in dependency order:
 
-- ecr -> vpc -> eks -> iam -> flux
+- bootstrap-iam -> ecr -> vpc -> eks -> iam -> flux
 
 Examples:
 
@@ -196,6 +200,8 @@ Checks include:
 - No ALB resources remain tagged with the EKS cluster tag
 - No Route53 records remain for the app host derived from `APP_URL`
 - ECR repository no longer exists
+
+The `bootstrap-iam` stack is excluded from destroy verification by design.
 
 Disable only when troubleshooting:
 
