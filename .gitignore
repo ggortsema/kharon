@@ -12,3 +12,10 @@ wheels/
 # Local certs for Docker builds
 certs/*
 !certs/.gitkeep
+
+# Terraform / Terragrunt local artifacts
+.terragrunt-cache/
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.*

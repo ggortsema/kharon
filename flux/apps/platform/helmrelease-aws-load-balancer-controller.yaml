@@ -1,0 +1,24 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: aws-load-balancer-controller
+  namespace: kube-system
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: aws-load-balancer-controller
+      version: "1.14.*"
+      sourceRef:
+        kind: HelmRepository
+        name: eks-charts
+        namespace: flux-system
+  values:
+    clusterName: kharon-dev-eks
+    region: us-east-1
+    vpcId: vpc-0a09a197c50ca80de
+    serviceAccount:
+      create: true
+      name: aws-load-balancer-controller
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::359546647832:role/kharon-aws-load-balancer-controller

@@ -1,0 +1,31 @@
+replicaCount: 1
+
+image:
+  repository: 359546647832.dkr.ecr.us-east-1.amazonaws.com/kharon-dev
+  pullPolicy: IfNotPresent
+  tag: latest
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: alb
+  annotations: {}
+  hosts:
+    - host: kharon.dev.mycroftai.org
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podLabels: {}

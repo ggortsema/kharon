@@ -1,0 +1,79 @@
+name: Infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/**"
+      - "flux/**"
+      - "deploy/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::359546647832:role/kharon-gha-terraform-plan-apply
+
+      - name: Terragrunt plan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        working-directory: infra/live/dev
+        run: terragrunt run --all plan --non-interactive -- -input=false
+
+  apply:
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::359546647832:role/kharon-gha-terraform-plan-apply
+
+      - name: Terragrunt apply
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        working-directory: infra/live/dev
+        run: terragrunt run --all apply --non-interactive -- -auto-approve -input=false

@@ -7,6 +7,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: kharon-dev
+  ECR_REGISTRY: 359546647832.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_URI: 359546647832.dkr.ecr.us-east-1.amazonaws.com/kharon-dev
 
 jobs:
   checks:
@@ -64,6 +71,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::359546647832:role/kharon-gha-terraform-plan-apply
+
+      - name: Login to Amazon ECR
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -71,5 +89,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: kharon:ci
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.IMAGE_URI }}:latest
+            ${{ env.IMAGE_URI }}:${{ github.sha }}
+            ${{ env.IMAGE_URI }}:v0.0.${{ github.run_number }}

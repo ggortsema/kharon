@@ -1,0 +1,8 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: kharon
+  namespace: flux-system
+spec:
+  image: 359546647832.dkr.ecr.us-east-1.amazonaws.com/kharon-dev
+  interval: 1m
