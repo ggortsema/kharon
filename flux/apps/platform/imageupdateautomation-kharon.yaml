@@ -20,7 +20,7 @@ spec:
       messageTemplate: |
         chore(images): update kharon image
 
-        {{range .Updated.Images -}}
+        {{range .Changed.Changes -}}
         - {{println .}}
         {{end -}}
     push:
