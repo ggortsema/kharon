@@ -589,22 +589,46 @@ wait_for_app_endpoint() {
 purge_ecr_images() {
   log "Purging ECR images from repository $ECR_REPOSITORY"
 
-  local image_ids_json
-  image_ids_json="$(aws ecr list-images \
-    --repository-name "$ECR_REPOSITORY" \
-    --query 'imageIds[*]' \
-    --output json \
-    --no-cli-pager)"
-
-  if [[ "$image_ids_json" == "[]" ]]; then
-    log "No ECR images to delete"
+  if ! aws ecr describe-repositories \
+    --repository-names "$ECR_REPOSITORY" \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --no-cli-pager >/dev/null 2>&1; then
+    log "ECR repository does not exist, nothing to purge"
     return 0
   fi
 
-  aws ecr batch-delete-image \
-    --repository-name "$ECR_REPOSITORY" \
-    --image-ids "$image_ids_json" \
-    --no-cli-pager >/dev/null
+  local image_ids_json
+  local deleted_any="false"
+
+  while true; do
+    image_ids_json="$(aws ecr list-images \
+      --repository-name "$ECR_REPOSITORY" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --max-items 100 \
+      --query 'imageIds[*]' \
+      --output json \
+      --no-cli-pager 2>/dev/null || echo '[]')"
+
+    if [[ "$image_ids_json" == "[]" ]]; then
+      break
+    fi
+
+    aws ecr batch-delete-image \
+      --repository-name "$ECR_REPOSITORY" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --image-ids "$image_ids_json" \
+      --no-cli-pager >/dev/null
+
+    deleted_any="true"
+  done
+
+  if [[ "$deleted_any" == "false" ]]; then
+    log "No ECR images to delete"
+    return 0
+  fi
 
   log "ECR images deleted"
 }

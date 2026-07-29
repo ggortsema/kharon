@@ -118,41 +118,88 @@ When resuming, use a prompt like:
 
 "Use docs/styxcd-migration-context.md as baseline. I am now providing ADRs and code references. Please map ADR decisions to a phased migration plan and propose the v1 Python architecture with contracts."
 
------------------
+## Stakeholder Justification For StyxCD
 
-You are 100% right, and your conclusion is exactly the right one.
+### Executive Summary
 
-What took 2 days was not “hello world app complexity,” it was integration complexity across tools and control planes. The app was trivial; the orchestration surface was the hard part.
+The current toolchain works, but operational reliability depends on manual coordination across multiple systems. StyxCD addresses this by acting as an orchestration control plane over existing tools (Terraform, Flux, Helm, CI triggers), converting fragile glue logic into reusable, policy-driven workflow blocks.
 
-Reusable orchestrator blocks solve this by turning fragile glue into stable primitives:
+### Evidence From The Kharon Validation
 
-Trigger block
-“on push/main with path filters” once, reused everywhere.
-Infra block
-“terraform/terragrunt apply with lock/backoff/retry.”
-GitOps block
-“wait for Flux kustomization + helmrelease ready.”
-Artifact block
-“build/tag/publish image and emit metadata.”
-Verify block
-“endpoint/health checks with timeout policy.”
-Rollback block
-standardized compensation behavior.
-Observability block
-consistent stage telemetry/events in one schema.
-Then each workflow becomes composition, not reinvention.
+The Kharon environment provided a realistic proof case:
 
-So instead of:
+- A simple application required significant integration effort across IAM/OIDC, CI, GitOps, DNS, ECR, and Terraform state management.
+- Multiple failures were not application bugs; they were cross-tool orchestration failures (state locks, race conditions, dependency cleanup, stale infrastructure artifacts).
+- Successful teardown/rebuild required sequencing, retries, readiness gates, cancellation of conflicting runs, and post-condition verification.
 
-bespoke GH Actions YAML
-ad hoc shell scripts
-one-off waits/retries/error handling
-you get:
+Conclusion: complexity is dominated by orchestration, not application logic.
 
-policy-driven, versioned stage library
-deterministic execution plan
-uniform retries/idempotency
-one UI and one event stream
-Your instinct is right: this is exactly where StyxCD provides leverage.
+### Why Existing Tools Alone Are Insufficient
 
-When you’re ready, we can start defining the first reusable block set from what we just learned in this repo, so the pain you paid here gets converted into permanent building blocks.
+Existing tools are strong within their own domain, but each has limited scope:
+
+- Terraform/Terragrunt: desired-state infrastructure for one stack/state at a time.
+- Flux/Helm: cluster and app reconciliation, not global workflow planning.
+- GitHub Actions/Jenkins: execution runners, not durable cross-system workflow control planes.
+
+Operational gaps that remain without StyxCD:
+
+- Cross-tool sequencing and dependency orchestration.
+- Idempotent recovery from partial failures.
+- Unified retry/backoff/timeout policy.
+- Global run state and lineage across systems.
+- Consistent pre/post-condition validation.
+
+### Value Proposition
+
+StyxCD provides reusable orchestration blocks and policy controls:
+
+- Trigger block: event routing (GitHub/Bitbucket/XLR/manual) with include/exclude path semantics.
+- Infra block: Terraform/Terragrunt with lock handling and retry policy.
+- GitOps block: Flux/Helm readiness and reconciliation checks.
+- Artifact block: build/publish metadata handoff.
+- Verify block: endpoint and runtime health gates.
+- Rollback/compensation block: standardized remediation paths.
+- Observability block: common event schema and telemetry forwarding.
+
+Result:
+
+- Less bespoke YAML/scripting.
+- Deterministic execution plans.
+- Faster onboarding of new services.
+- Better MTTR through consistent failure handling.
+- Stronger auditability and operational confidence.
+
+### Strategic Benefits
+
+- Reduces dependency on any single CI vendor as workflow engine.
+- Allows Kubernetes-native execution agents and optional thin CI bridges.
+- Preserves investment in existing best-of-breed tools via adapters.
+- Creates a platform capability reusable across products/teams.
+
+### Cost of Not Building StyxCD
+
+- Continued repeated effort per service for similar orchestration glue.
+- Higher incident probability from race conditions and partial-state failures.
+- Slower delivery due to environment-specific automation drift.
+- Ongoing operational burden concentrated in senior engineers.
+
+### Recommended Approval Scope
+
+Phase 1 (MVP):
+
+- Python control plane, workflow planner, event router.
+- Kubernetes-native execution agent.
+- Terraform/Flux/Helm adapters.
+- PostgreSQL state model and RabbitMQ dispatch.
+- Minimum UI run visibility and stage-level status.
+
+Phase 2 (Scale):
+
+- Expanded policy engine (approvals, advanced retries, compensation).
+- Rich observability integrations and run analytics.
+- Additional adapters and standardized workflow catalog.
+
+### Suggested Stakeholder Message
+
+"StyxCD is not replacing Terraform, Flux, or Helm. It is the orchestration layer that makes those tools reliable together at scale, reduces repeated engineering effort, and improves deployment safety with deterministic, observable workflows."
