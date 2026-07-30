@@ -17,7 +17,32 @@ locals {
 inputs = {
   name               = "${local.root.locals.project}-${local.root.locals.environment}-eks"
   kubernetes_version = "1.30"
-  enable_cluster_creator_admin_permissions = true
+  enable_cluster_creator_admin_permissions = false
+
+  access_entries = {
+    cluster_creator = {
+      principal_arn = "arn:aws:iam::${local.root.locals.aws_account_id}:user/kharon-local-dev"
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+    gha_admin = {
+      principal_arn = "arn:aws:iam::${local.root.locals.aws_account_id}:role/kharon-gha-terraform-plan-apply"
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
 
   endpoint_public_access = true
 
