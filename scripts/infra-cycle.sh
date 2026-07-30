@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA_DIR="$ROOT_DIR/infra/live/dev"
+APP_HELMRELEASE_PATH="$ROOT_DIR/flux/apps/kharon/helmrelease.yaml"
+CORP_CA_CERT_PATH_DEFAULT="$ROOT_DIR/certs/zscaler-root-ca.crt"
 
 AWS_PROFILE_DEFAULT="kharon-local-dev"
 AWS_REGION_DEFAULT="us-east-1"
@@ -11,6 +13,10 @@ EKS_CLUSTER_NAME_DEFAULT="kharon-dev-eks"
 APP_URL_DEFAULT="http://kharon.dev.mycroftai.org/"
 WAIT_TIMEOUT_DEFAULT="1800"
 WAIT_INTERVAL_DEFAULT="10"
+AUTO_BUILD_AND_PUSH_IMAGE_DEFAULT="true"
+AUTO_PATCH_ALB_VPC_DEFAULT="true"
+ALB_CONTROLLER_RELEASE_NAME="aws-load-balancer-controller"
+ALB_CONTROLLER_RELEASE_NAMESPACE="kube-system"
 
 AWS_PROFILE="${AWS_PROFILE:-$AWS_PROFILE_DEFAULT}"
 AWS_REGION="${AWS_REGION:-$AWS_REGION_DEFAULT}"
@@ -20,6 +26,9 @@ EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EKS_CLUSTER_NAME_DEFAULT}"
 APP_URL="${APP_URL:-$APP_URL_DEFAULT}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-$WAIT_TIMEOUT_DEFAULT}"
 WAIT_INTERVAL="${WAIT_INTERVAL:-$WAIT_INTERVAL_DEFAULT}"
+AUTO_BUILD_AND_PUSH_IMAGE="${AUTO_BUILD_AND_PUSH_IMAGE:-$AUTO_BUILD_AND_PUSH_IMAGE_DEFAULT}"
+AUTO_PATCH_ALB_VPC="${AUTO_PATCH_ALB_VPC:-$AUTO_PATCH_ALB_VPC_DEFAULT}"
+CORP_CA_CERT_PATH="${CORP_CA_CERT_PATH:-$CORP_CA_CERT_PATH_DEFAULT}"
 
 PURGE_ECR="false"
 ASSUME_YES="false"
@@ -49,6 +58,8 @@ Options:
   --require-healthy  For status only: exit non-zero if runtime is not healthy.
   --no-verify-destroy  Skip post-destroy verification checks.
   --purge-ecr  Deletes all images in ECR repository before ECR destroy.
+  --no-auto-image-build  Skip automatic build/push of missing app image tag.
+  --no-auto-alb-vpc-patch  Skip automatic runtime patch of ALB controller vpcId.
   --yes        Skips interactive confirmation prompt.
   --no-wait    Skip post-step readiness waits.
   --wait-timeout <seconds>  Timeout for readiness waits (default: 1800).
@@ -62,6 +73,9 @@ Environment variables (optional):
   APP_URL (default: http://kharon.dev.mycroftai.org/)
   WAIT_TIMEOUT (default: 1800)
   WAIT_INTERVAL (default: 10)
+  AUTO_BUILD_AND_PUSH_IMAGE (default: true)
+  AUTO_PATCH_ALB_VPC (default: true)
+  CORP_CA_CERT_PATH (default: certs/zscaler-root-ca.crt)
 EOF
 }
 
@@ -90,6 +104,152 @@ check_prereqs() {
   fi
 
   export AWS_PROFILE AWS_REGION GITHUB_TOKEN
+}
+
+strip_quotes() {
+  local value="$1"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf '%s' "$value"
+}
+
+app_image_repository_from_helmrelease() {
+  local value
+  value="$(awk '/^[[:space:]]*repository:[[:space:]]*/ { print $2; exit }' "$APP_HELMRELEASE_PATH")"
+  strip_quotes "$value"
+}
+
+app_image_tag_from_helmrelease() {
+  local value
+  value="$(awk '/^[[:space:]]*tag:[[:space:]]*/ { print $2; exit }' "$APP_HELMRELEASE_PATH")"
+  strip_quotes "$value"
+}
+
+ecr_repository_name_from_image_repository() {
+  local image_repository="$1"
+  printf '%s' "${image_repository##*/}"
+}
+
+ecr_registry_from_image_repository() {
+  local image_repository="$1"
+  printf '%s' "${image_repository%/*}"
+}
+
+cluster_vpc_id() {
+  aws eks describe-cluster \
+    --name "$EKS_CLUSTER_NAME" \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --query 'cluster.resourcesVpcConfig.vpcId' \
+    --output text \
+    --no-cli-pager
+}
+
+ensure_app_image_available() {
+  if [[ "$AUTO_BUILD_AND_PUSH_IMAGE" != "true" ]]; then
+    log "Skipping app image availability check (--no-auto-image-build)"
+    return 0
+  fi
+
+  local image_repository
+  local image_tag
+  local ecr_repository_name
+  local image_ref
+  local ecr_registry
+
+  image_repository="$(app_image_repository_from_helmrelease)"
+  image_tag="$(app_image_tag_from_helmrelease)"
+
+  if [[ -z "$image_repository" || -z "$image_tag" ]]; then
+    echo "Failed to parse image repository/tag from $APP_HELMRELEASE_PATH"
+    exit 1
+  fi
+
+  ecr_repository_name="$(ecr_repository_name_from_image_repository "$image_repository")"
+  ecr_registry="$(ecr_registry_from_image_repository "$image_repository")"
+  image_ref="$image_repository:$image_tag"
+
+  if aws ecr describe-images \
+    --repository-name "$ecr_repository_name" \
+    --image-ids "imageTag=$image_tag" \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --no-cli-pager >/dev/null 2>&1; then
+    log "App image already present in ECR: $image_ref"
+    return 0
+  fi
+
+  log "App image missing in ECR, building and pushing: $image_ref"
+
+  command -v docker >/dev/null 2>&1 || {
+    echo "docker is required to auto-build missing app image"
+    exit 1
+  }
+
+  aws ecr get-login-password \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" | docker login --username AWS --password-stdin "$ecr_registry" >/dev/null
+
+  local -a buildx_cmd
+  buildx_cmd=(docker buildx build --no-cache --platform linux/amd64 -t "$image_ref" --push)
+  if [[ -f "$CORP_CA_CERT_PATH" ]]; then
+    buildx_cmd+=(--secret "id=corp_ca,src=$CORP_CA_CERT_PATH")
+  fi
+  buildx_cmd+=("$ROOT_DIR")
+  "${buildx_cmd[@]}"
+
+  aws ecr describe-images \
+    --repository-name "$ecr_repository_name" \
+    --image-ids "imageTag=$image_tag" \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --no-cli-pager >/dev/null
+
+  log "App image pushed successfully: $image_ref"
+}
+
+patch_alb_controller_vpc_runtime() {
+  if [[ "$AUTO_PATCH_ALB_VPC" != "true" ]]; then
+    log "Skipping ALB controller vpcId runtime patch (--no-auto-alb-vpc-patch)"
+    return 0
+  fi
+
+  local desired_vpc
+  local current_vpc
+  desired_vpc="$(cluster_vpc_id)"
+
+  if [[ -z "$desired_vpc" || "$desired_vpc" == "None" ]]; then
+    echo "Unable to determine cluster VPC ID for ALB controller patch"
+    exit 1
+  fi
+
+  update_kubeconfig
+
+  wait_until "HelmRelease $ALB_CONTROLLER_RELEASE_NAME exists" \
+    kubectl -n "$ALB_CONTROLLER_RELEASE_NAMESPACE" get helmrelease "$ALB_CONTROLLER_RELEASE_NAME" >/dev/null 2>&1
+
+  current_vpc="$(kubectl -n "$ALB_CONTROLLER_RELEASE_NAMESPACE" get helmrelease "$ALB_CONTROLLER_RELEASE_NAME" -o jsonpath='{.spec.values.vpcId}' 2>/dev/null || true)"
+
+  if [[ "$current_vpc" == "$desired_vpc" ]]; then
+    log "ALB controller vpcId already matches cluster VPC: $desired_vpc"
+  else
+    log "Patching ALB controller vpcId to current cluster VPC: $desired_vpc"
+    kubectl -n "$ALB_CONTROLLER_RELEASE_NAMESPACE" patch helmrelease "$ALB_CONTROLLER_RELEASE_NAME" \
+      --type merge \
+      -p "{\"spec\":{\"values\":{\"vpcId\":\"$desired_vpc\"}}}"
+
+    kubectl -n "$ALB_CONTROLLER_RELEASE_NAMESPACE" annotate helmrelease "$ALB_CONTROLLER_RELEASE_NAME" \
+      reconcile.fluxcd.io/requestedAt="$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+      --overwrite >/dev/null
+  fi
+
+  wait_until "ALB controller HelmRelease is Ready" \
+    bash -c '[[ "$(kubectl -n "'"$ALB_CONTROLLER_RELEASE_NAMESPACE"'" get helmrelease "'"$ALB_CONTROLLER_RELEASE_NAME"'" -o jsonpath="{.status.conditions[?(@.type==\"Ready\")].status}")" == "True" ]]'
+
+  wait_until "ALB controller Deployment rollout is complete" \
+    kubectl -n "$ALB_CONTROLLER_RELEASE_NAMESPACE" rollout status "deployment/$ALB_CONTROLLER_RELEASE_NAME" --timeout=300s >/dev/null
 }
 
 run_tg() {
@@ -725,6 +885,79 @@ verify_destroy_postconditions() {
   log "Post-destroy verification passed"
 }
 
+cleanup_app_route53_records() {
+  local app_host
+  local record_fqdn
+  local hosted_zones
+  local zone_id
+  local records
+  local change_id
+  local deleted_count=0
+
+  app_host="$(app_host_from_url)"
+  if [[ -z "$app_host" ]]; then
+    return 0
+  fi
+
+  record_fqdn="${app_host%.}."
+  hosted_zones="$(aws route53 list-hosted-zones --query 'HostedZones[].Id' --output text --no-cli-pager 2>/dev/null || true)"
+
+  if [[ -z "$hosted_zones" || "$hosted_zones" == "None" ]]; then
+    return 0
+  fi
+
+  for zone_id in $hosted_zones; do
+    records="$(aws route53 list-resource-record-sets \
+      --hosted-zone-id "$zone_id" \
+      --query "ResourceRecordSets[?Name == '$record_fqdn' && (Type == 'A' || Type == 'AAAA')].[Type,AliasTarget.HostedZoneId,AliasTarget.DNSName,AliasTarget.EvaluateTargetHealth]" \
+      --output text \
+      --no-cli-pager 2>/dev/null || true)"
+
+    if [[ -z "$records" || "$records" == "None" ]]; then
+      continue
+    fi
+
+    while read -r record_type alias_zone_id alias_dns_name evaluate_target_health; do
+      local evaluate_target_health_bool
+      local change_batch
+
+      if [[ -z "$record_type" || "$record_type" == "None" ]]; then
+        continue
+      fi
+      if [[ -z "$alias_zone_id" || "$alias_zone_id" == "None" ]]; then
+        continue
+      fi
+      if [[ -z "$alias_dns_name" || "$alias_dns_name" == "None" ]]; then
+        continue
+      fi
+
+      evaluate_target_health_bool="false"
+      if [[ "$evaluate_target_health" == "True" ]]; then
+        evaluate_target_health_bool="true"
+      fi
+
+      change_batch="{\"Comment\":\"infra-cycle cleanup for $record_fqdn\",\"Changes\":[{\"Action\":\"DELETE\",\"ResourceRecordSet\":{\"Name\":\"$record_fqdn\",\"Type\":\"$record_type\",\"AliasTarget\":{\"HostedZoneId\":\"$alias_zone_id\",\"DNSName\":\"$alias_dns_name\",\"EvaluateTargetHealth\":$evaluate_target_health_bool}}}]}"
+
+      log "Deleting Route53 record: $record_fqdn ($record_type)"
+      change_id="$(aws route53 change-resource-record-sets \
+        --hosted-zone-id "$zone_id" \
+        --change-batch "$change_batch" \
+        --query 'ChangeInfo.Id' \
+        --output text \
+        --no-cli-pager)"
+
+      aws route53 wait resource-record-sets-changed --id "$change_id" --no-cli-pager
+      deleted_count=$((deleted_count + 1))
+    done <<<"$records"
+  done
+
+  if (( deleted_count > 0 )); then
+    log "Deleted $deleted_count Route53 app alias record(s)"
+  else
+    log "No Route53 app alias records needed cleanup"
+  fi
+}
+
 destroy_stack() {
   if ! confirm "About to DESTROY infrastructure in account profile '$AWS_PROFILE' region '$AWS_REGION'. Continue?"; then
     echo "Aborted"
@@ -742,6 +975,8 @@ destroy_stack() {
   fi
 
   tg_destroy_if_needed ecr
+
+  cleanup_app_route53_records
 
   if [[ "$VERIFY_DESTROY" == "true" ]]; then
     verify_destroy_postconditions
@@ -763,6 +998,8 @@ recreate_stack() {
   wait_for_eks_ready
   tg_apply_if_needed iam
   tg_apply_if_needed flux
+  ensure_app_image_available
+  patch_alb_controller_vpc_runtime
   wait_for_flux_ready
   wait_for_app_endpoint
 
@@ -787,6 +1024,14 @@ parse_args() {
     case "$1" in
       --purge-ecr)
         PURGE_ECR="true"
+        shift
+        ;;
+      --no-auto-image-build)
+        AUTO_BUILD_AND_PUSH_IMAGE="false"
+        shift
+        ;;
+      --no-auto-alb-vpc-patch)
+        AUTO_PATCH_ALB_VPC="false"
         shift
         ;;
       --json)

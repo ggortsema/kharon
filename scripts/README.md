@@ -7,6 +7,9 @@ This directory contains `infra-cycle.sh`, a single-entry script to safely destro
 - Runs Terragrunt stacks in dependency-safe order.
 - Skips steps that are already complete when possible.
 - Waits for EKS, Flux, and app endpoint readiness (unless disabled).
+- Auto-builds and pushes the app image tag if ECR is empty after rebuild.
+- Auto-patches ALB controller `vpcId` at runtime to match the current EKS VPC.
+- Cleans up lingering Route53 app alias records during destroy.
 - Supports a status preflight mode for both humans and automation.
 - Preserves a bootstrap GitHub Actions IAM role so a post-teardown push can still self-rebuild.
 
@@ -19,6 +22,7 @@ Install and configure:
 - terragrunt
 - Valid AWS credentials/profile for the target account
 - GitHub token for Flux module apply/destroy actions
+- Docker (required only when app image is missing and must be auto-built)
 
 Export token for mutating actions:
 
@@ -37,6 +41,9 @@ The script uses these defaults unless overridden by environment variables:
 - APP_URL: http://kharon.dev.mycroftai.org/
 - WAIT_TIMEOUT: 1800
 - WAIT_INTERVAL: 10
+- AUTO_BUILD_AND_PUSH_IMAGE: true
+- AUTO_PATCH_ALB_VPC: true
+- CORP_CA_CERT_PATH: certs/zscaler-root-ca.crt
 
 ## Actions
 
@@ -115,6 +122,8 @@ Global/script options:
 - --no-wait: skip readiness waits
 - --wait-timeout <seconds>: max wait time per readiness gate
 - --no-verify-destroy: skip post-destroy verification checks
+- --no-auto-image-build: disable automatic app image build/push when missing
+- --no-auto-alb-vpc-patch: disable automatic ALB controller VPC runtime patch
 
 Status-only options:
 
@@ -214,3 +223,5 @@ scripts/infra-cycle.sh destroy --yes --no-verify-destroy
 - Idempotent behavior is best-effort based on Terragrunt state and plan exit codes.
 - planExit = 0 means converged; 2 means changes detected; 1 usually indicates plan/lock/error and apply may still be attempted during recreate.
 - `--require-healthy` is intentionally restricted to the `status` action so it can be used as a pure gate in automation.
+- During recreate, the script checks the Flux app image tag and builds a linux/amd64 image if ECR does not contain that tag yet.
+- During recreate, the script patches the ALB controller HelmRelease `spec.values.vpcId` to the live cluster VPC and waits for controller readiness.
