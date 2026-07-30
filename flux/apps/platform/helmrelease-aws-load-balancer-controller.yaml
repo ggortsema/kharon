@@ -16,6 +16,7 @@ spec:
   values:
     clusterName: kharon-dev-eks
     region: us-east-1
+    vpcId: vpc-0c1c6b6044a903e4e
     serviceAccount:
       create: true
       name: aws-load-balancer-controller
