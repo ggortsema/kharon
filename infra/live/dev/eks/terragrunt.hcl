@@ -17,6 +17,7 @@ locals {
 inputs = {
   name               = "${local.root.locals.project}-${local.root.locals.environment}-eks"
   kubernetes_version = "1.30"
+  enable_cluster_creator_admin_permissions = true
 
   endpoint_public_access = true
 

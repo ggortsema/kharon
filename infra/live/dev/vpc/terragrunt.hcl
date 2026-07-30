@@ -27,10 +27,12 @@ inputs = {
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
+    "kubernetes.io/cluster/${local.root.locals.project}-${local.root.locals.environment}-eks" = "shared"
   }
 
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/cluster/${local.root.locals.project}-${local.root.locals.environment}-eks" = "shared"
   }
 
   tags = local.root.locals.common_tags
