@@ -202,6 +202,31 @@ Clean rebuild from scratch:
 scripts/infra-cycle.sh full-cycle --purge-ecr --yes
 ```
 
+Completely fresh restart (from mostly empty environment):
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+scripts/infra-cycle.sh recreate --yes
+```
+
+Notes:
+
+- This recreate path includes `bootstrap-iam` first, then the rest of the stacks.
+- Use this when you want to bring everything back after teardown.
+
+Bootstrap-only bring-up (IAM/OIDC role only):
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+cd infra/live/dev/bootstrap-iam
+terragrunt apply --non-interactive -- -auto-approve -input=false
+```
+
+Notes:
+
+- Use this when you only need the GitHub Actions OIDC bootstrap role back.
+- This does not recreate ECR, VPC, EKS, IAM addons, or Flux.
+
 ## Post-Destroy Verification
 
 By default, `destroy` runs post-destroy checks and fails if leftovers are detected.
