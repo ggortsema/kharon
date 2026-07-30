@@ -11,6 +11,7 @@ This directory contains `infra-cycle.sh`, a single-entry script to safely destro
 - Auto-patches ALB controller `vpcId` at runtime to match the current EKS VPC.
 - Cleans up lingering Route53 app alias records during destroy.
 - Cleans up orphan ALBs still tagged to the EKS cluster before VPC destroy.
+- Retries VPC destroy automatically and re-runs ALB cleanup between attempts.
 - Supports a status preflight mode for both humans and automation.
 - Preserves a bootstrap GitHub Actions IAM role so a post-teardown push can still self-rebuild.
 
@@ -45,6 +46,8 @@ The script uses these defaults unless overridden by environment variables:
 - AUTO_BUILD_AND_PUSH_IMAGE: true
 - AUTO_PATCH_ALB_VPC: true
 - CORP_CA_CERT_PATH: certs/zscaler-root-ca.crt
+- VPC_DESTROY_MAX_ATTEMPTS: 3
+- VPC_DESTROY_RETRY_DELAY: 20
 
 ## Actions
 
@@ -226,3 +229,4 @@ scripts/infra-cycle.sh destroy --yes --no-verify-destroy
 - `--require-healthy` is intentionally restricted to the `status` action so it can be used as a pure gate in automation.
 - During recreate, the script checks the Flux app image tag and builds a linux/amd64 image if ECR does not contain that tag yet.
 - During recreate, the script patches the ALB controller HelmRelease `spec.values.vpcId` to the live cluster VPC and waits for controller readiness.
+- During destroy, VPC teardown is retried automatically with cleanup hooks to absorb transient AWS dependency lag.

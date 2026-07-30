@@ -38,6 +38,8 @@ REQUIRE_HEALTHY="false"
 HEALTHY="true"
 HEALTH_FAILURES=()
 VERIFY_DESTROY="true"
+VPC_DESTROY_MAX_ATTEMPTS="${VPC_DESTROY_MAX_ATTEMPTS:-3}"
+VPC_DESTROY_RETRY_DELAY="${VPC_DESTROY_RETRY_DELAY:-20}"
 
 usage() {
   cat <<'EOF'
@@ -76,6 +78,8 @@ Environment variables (optional):
   AUTO_BUILD_AND_PUSH_IMAGE (default: true)
   AUTO_PATCH_ALB_VPC (default: true)
   CORP_CA_CERT_PATH (default: certs/zscaler-root-ca.crt)
+  VPC_DESTROY_MAX_ATTEMPTS (default: 3)
+  VPC_DESTROY_RETRY_DELAY (default: 20)
 EOF
 }
 
@@ -1003,6 +1007,114 @@ cleanup_orphan_albs_for_cluster() {
   fi
 }
 
+current_vpc_id_for_cleanup() {
+  local vpc_id
+
+  vpc_id="$((cd "$INFRA_DIR/vpc" && terragrunt output -raw vpc_id 2>/dev/null) || true)"
+  if [[ -n "$vpc_id" && "$vpc_id" != "None" ]]; then
+    printf '%s' "$vpc_id"
+    return 0
+  fi
+
+  vpc_id="$(aws ec2 describe-vpcs \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --filters Name=tag:Name,Values=kharon-dev-vpc Name=tag:Project,Values=kharon Name=tag:Environment,Values=dev \
+    --query 'Vpcs[0].VpcId' \
+    --output text \
+    --no-cli-pager 2>/dev/null || true)"
+
+  if [[ -n "$vpc_id" && "$vpc_id" != "None" ]]; then
+    printf '%s' "$vpc_id"
+  fi
+}
+
+cleanup_orphan_albs_in_vpc() {
+  local vpc_id="$1"
+  local lb_arns
+  local lb_arn
+  local deleted_count=0
+
+  if [[ -z "$vpc_id" ]]; then
+    return 0
+  fi
+
+  lb_arns="$(aws elbv2 describe-load-balancers \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --query "LoadBalancers[?VpcId=='$vpc_id'].LoadBalancerArn" \
+    --output text \
+    --no-cli-pager 2>/dev/null || true)"
+
+  if [[ -z "$lb_arns" || "$lb_arns" == "None" ]]; then
+    return 0
+  fi
+
+  for lb_arn in $lb_arns; do
+    log "Deleting VPC-associated ALB: $lb_arn"
+    aws elbv2 delete-load-balancer \
+      --load-balancer-arn "$lb_arn" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --no-cli-pager >/dev/null
+
+    aws elbv2 wait load-balancers-deleted \
+      --load-balancer-arns "$lb_arn" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --no-cli-pager
+
+    deleted_count=$((deleted_count + 1))
+  done
+
+  if (( deleted_count > 0 )); then
+    log "Deleted $deleted_count VPC-associated ALB(s)"
+  fi
+}
+
+tg_destroy_with_retries_if_needed() {
+  local dir="$1"
+  local max_attempts="$2"
+  local retry_delay="$3"
+  local attempt
+  local exit_code
+  local vpc_id
+
+  if ! tg_has_state_resources "$dir"; then
+    log "Skipping $dir destroy (no resources in state)"
+    return 0
+  fi
+
+  for attempt in $(seq 1 "$max_attempts"); do
+    log "terragrunt destroy in $dir (attempt $attempt/$max_attempts)"
+    set +e
+    (
+      cd "$INFRA_DIR/$dir"
+      terragrunt destroy --non-interactive -- -auto-approve -input=false
+    )
+    exit_code=$?
+    set -e
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      return 0
+    fi
+
+    if [[ "$attempt" -ge "$max_attempts" ]]; then
+      return "$exit_code"
+    fi
+
+    # VPC destroy commonly fails on residual ALBs/ENIs during eventual consistency windows.
+    if [[ "$dir" == "vpc" ]]; then
+      cleanup_orphan_albs_for_cluster
+      vpc_id="$(current_vpc_id_for_cleanup)"
+      cleanup_orphan_albs_in_vpc "$vpc_id"
+    fi
+
+    log "Destroy retry needed for $dir; sleeping ${retry_delay}s before retry"
+    sleep "$retry_delay"
+  done
+}
+
 destroy_stack() {
   if ! confirm "About to DESTROY infrastructure in account profile '$AWS_PROFILE' region '$AWS_REGION'. Continue?"; then
     echo "Aborted"
@@ -1014,7 +1126,7 @@ destroy_stack() {
   tg_destroy_if_needed eks
   wait_for_eks_deleted
   cleanup_orphan_albs_for_cluster
-  tg_destroy_if_needed vpc
+  tg_destroy_with_retries_if_needed vpc "$VPC_DESTROY_MAX_ATTEMPTS" "$VPC_DESTROY_RETRY_DELAY"
 
   if [[ "$PURGE_ECR" == "true" ]]; then
     purge_ecr_images
