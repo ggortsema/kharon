@@ -958,6 +958,51 @@ cleanup_app_route53_records() {
   fi
 }
 
+cleanup_orphan_albs_for_cluster() {
+  local lb_arns
+  local lb_arn
+  local deleted_count=0
+
+  lb_arns="$(aws resourcegroupstaggingapi get-resources \
+    --tag-filters "Key=kubernetes.io/cluster/$EKS_CLUSTER_NAME" \
+    --resource-type-filters elasticloadbalancing:loadbalancer \
+    --query 'ResourceTagMappingList[].ResourceARN' \
+    --output text \
+    --no-cli-pager 2>/dev/null || true)"
+
+  if [[ -z "$lb_arns" || "$lb_arns" == "None" ]]; then
+    log "No cluster-tagged ALBs found for cleanup"
+    return 0
+  fi
+
+  for lb_arn in $lb_arns; do
+    if ! aws elbv2 describe-load-balancers --load-balancer-arns "$lb_arn" --region "$AWS_REGION" --profile "$AWS_PROFILE" --no-cli-pager >/dev/null 2>&1; then
+      continue
+    fi
+
+    log "Deleting orphan ALB: $lb_arn"
+    aws elbv2 delete-load-balancer \
+      --load-balancer-arn "$lb_arn" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --no-cli-pager
+
+    aws elbv2 wait load-balancers-deleted \
+      --load-balancer-arns "$lb_arn" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --no-cli-pager
+
+    deleted_count=$((deleted_count + 1))
+  done
+
+  if (( deleted_count > 0 )); then
+    log "Deleted $deleted_count orphan ALB(s)"
+  else
+    log "No orphan ALBs required deletion"
+  fi
+}
+
 destroy_stack() {
   if ! confirm "About to DESTROY infrastructure in account profile '$AWS_PROFILE' region '$AWS_REGION'. Continue?"; then
     echo "Aborted"
@@ -968,6 +1013,7 @@ destroy_stack() {
   tg_destroy_if_needed iam
   tg_destroy_if_needed eks
   wait_for_eks_deleted
+  cleanup_orphan_albs_for_cluster
   tg_destroy_if_needed vpc
 
   if [[ "$PURGE_ECR" == "true" ]]; then
